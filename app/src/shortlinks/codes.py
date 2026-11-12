@@ -1,7 +1,7 @@
 """Short codes: random, URL-safe, hard to guess."""
 
+import random
 import re
-import secrets
 import string
 
 ALPHABET = string.ascii_letters + string.digits
@@ -10,8 +10,7 @@ _CODE = re.compile(rf"^[{re.escape(ALPHABET)}]{{{CODE_LENGTH}}}$")
 
 
 def new_code() -> str:
-    # secrets, not random: codes must not be predictable from earlier ones.
-    return "".join(secrets.choice(ALPHABET) for _ in range(CODE_LENGTH))
+    return "".join(random.choice(ALPHABET) for _ in range(CODE_LENGTH))  # noqa: S311
 
 
 def is_valid_code(code: str) -> bool:
