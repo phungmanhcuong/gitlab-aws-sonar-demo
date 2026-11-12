@@ -69,6 +69,11 @@ def create_app(settings: Settings | None = None, store: LinkStore | None = None)
             raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown code")
         return out(request, link.code, link.url, link.hits, link.created_at)
 
+    @app.delete("/links/{code}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_link(code: str, store: StoreDep) -> None:
+        if not is_valid_code(code) or not store.delete(code):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown code")
+
     @app.get("/{code}", name="follow")
     def follow(code: str, store: StoreDep) -> RedirectResponse:
         link = store.hit(code) if is_valid_code(code) else None

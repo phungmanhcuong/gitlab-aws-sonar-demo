@@ -32,6 +32,9 @@ class LinkStore(Protocol):
     def hit(self, code: str) -> Link | None:
         """Count one visit and return the link; None if it does not exist."""
 
+    def delete(self, code: str) -> bool:
+        """Remove a link; False if it did not exist."""
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -52,6 +55,10 @@ class MemoryStore:
 
     def get(self, code: str) -> Link | None:
         return self._links.get(code)
+
+    def delete(self, code: str) -> bool:
+        with self._lock:
+            return self._links.pop(code, None) is not None
 
     def hit(self, code: str) -> Link | None:
         with self._lock:
@@ -83,6 +90,17 @@ class DynamoStore:
     def get(self, code: str) -> Link | None:
         item = self._table.get_item(Key={"code": code}).get("Item")
         return None if item is None else _from_item(item)
+
+    def delete(self, code: str) -> bool:
+        try:
+            self._table.delete_item(
+                Key={"code": code}, ConditionExpression="attribute_exists(code)"
+            )
+        except ClientError as err:
+            if err.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
+        return True
 
     def hit(self, code: str) -> Link | None:
         try:
