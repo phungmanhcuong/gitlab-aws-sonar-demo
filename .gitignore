@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+app/coverage.xml
+app/report.xml
+app/gl-code-quality.json
+.coverage
+# Terraform
+.terraform/
+*.tfplan
+*.tfstate
+*.tfstate.*
+# Local only
+infra/bootstrap/bootstrap.env
+infra/bootstrap/build/
+image.tar
+.DS_Store

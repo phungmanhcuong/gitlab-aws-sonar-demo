@@ -1,0 +1,51 @@
+# Shared rules and job templates. Jobs pick them with `extends:`.
+
+# Checks run on every branch and merge request, never on release tags (a tag only promotes a tested image).
+.rules:checks:
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
+
+.rules:main:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# AWS jobs on main run once the bootstrap has run and the role variables are set.
+.rules:main-aws:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $ROLE_ARN_STAGING
+
+.rules:release-tag:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $ROLE_ARN_PRODUCTION
+
+.python:
+  image: python:3.13.18-slim-trixie
+
+# GitLab signs a short-lived OIDC token for the job; AWS exchanges it for the role in AWS_ROLE_ARN.
+# Each job sets AWS_ROLE_ARN to the one role it needs.
+.aws:
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
+  variables:
+    AWS_WEB_IDENTITY_TOKEN_FILE: /tmp/gitlab-oidc-token
+    AWS_ROLE_SESSION_NAME: gitlab-$CI_PROJECT_ID-$CI_JOB_ID
+
+.aws-token:
+  script:
+    - printf '%s' "$GITLAB_OIDC_TOKEN" > "$AWS_WEB_IDENTITY_TOKEN_FILE"
+
+.trivy:
+  image:
+    name: aquasec/trivy:0.76.2
+    entrypoint: [""]
+  variables:
+    TRIVY_CACHE_DIR: .trivycache
+    TRIVY_NO_PROGRESS: "true"
+    # The ECR mirror of the vulnerability database avoids ghcr.io rate limits on shared runners.
+    TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2
+  cache:
+    key: trivy
+    paths: [.trivycache]

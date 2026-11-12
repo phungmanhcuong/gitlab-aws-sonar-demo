@@ -1,0 +1,40 @@
+# One pipeline per change. What runs where:
+#   merge request / branch  lint, types, tests (>= 80 % coverage), SAST, secret detection, dependency scan,
+#                           Terraform checks, read-only plan, trust guard
+#   main                    the same checks, then SonarQube quality gate, image build -> scan -> push,
+#                           deploy staging, smoke test
+#   tag vX.Y.Z              manual deploy to production of the image main already built, smoke test, release
+# AWS access comes from GitLab's OIDC token (no stored keys); see infra/bootstrap/ for the roles.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  auto_cancel:
+    on_new_commit: interruptible
+
+stages: [check, test, build, staging, production]
+
+default:
+  interruptible: true
+  retry:
+    max: 1
+    when: [runner_system_failure, scheduler_failure, stuck_or_timeout_failure]
+
+variables:
+  AWS_REGION: ap-southeast-1
+  APP_NAME: shortlinks
+  IMAGE_REPO: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/shortlinks
+  # GitLab's SAST and secret detection jobs also run in merge request pipelines.
+  AST_ENABLE_MR_PIPELINES: "true"
+
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - local: ci/common.yml
+  - local: ci/quality.yml
+  - local: ci/security.yml
+  - local: ci/infra.yml
+  - local: ci/delivery.yml

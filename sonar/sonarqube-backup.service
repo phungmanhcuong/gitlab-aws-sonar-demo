@@ -1,0 +1,7 @@
+[Unit]
+Description=SonarQube database backup
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sonarqube/backup.sh

@@ -1,0 +1,102 @@
+# Terraform checks, a read-only plan for merge requests, and the trust guard.
+
+.terraform:
+  image:
+    name: hashicorp/terraform:1.17.2
+    entrypoint: [""]
+  variables:
+    TF_IN_AUTOMATION: "true"
+    TF_INPUT: "false"
+    TF_PLUGIN_CACHE_DIR: $CI_PROJECT_DIR/.terraform-plugins
+  cache:
+    key: terraform
+    paths: [.terraform-plugins]
+  before_script:
+    - mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+# init <stack> <state key>: the bucket comes from TF_STATE_BUCKET; S3 itself holds the lock (use_lockfile).
+.tf-init:
+  script:
+    - |
+      tf_init() {
+        terraform -chdir="infra/stacks/$1" init -reconfigure \
+          -backend-config="bucket=$TF_STATE_BUCKET" -backend-config="key=$2" -backend-config="region=$AWS_REGION"
+      }
+
+terraform-checks:
+  extends: [.terraform, .rules:checks]
+  stage: check
+  needs: []
+  script:
+    - terraform fmt -check -recursive -diff infra
+    - |
+      for stack in shared service; do
+        terraform -chdir="infra/stacks/$stack" init -backend=false
+        terraform -chdir="infra/stacks/$stack" validate
+      done
+
+tflint:
+  extends: .rules:checks
+  stage: check
+  needs: []
+  image:
+    name: ghcr.io/terraform-linters/tflint:v0.66.0
+    entrypoint: [""]
+  script:
+    - cd infra && tflint --recursive --config "$CI_PROJECT_DIR/.tflint.hcl" --format compact
+
+# Merge requests: what would change in AWS, with a role that can only read. -lock=false: a read-only plan
+# must not take the state lock that a deploy on main may hold.
+terraform-plan:
+  extends: [.terraform, .aws]
+  stage: test
+  needs: [terraform-checks]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $ROLE_ARN_READONLY
+  variables:
+    AWS_ROLE_ARN: $ROLE_ARN_READONLY
+  script:
+    - !reference [.aws-token, script]
+    - !reference [.tf-init, script]
+    - tf_init shared shared.tfstate
+    - terraform -chdir=infra/stacks/shared plan -lock=false
+    - tf_init service service/staging.tfstate
+    # Plan infrastructure changes against the image staging runs now; a new image is the deploy job's business.
+    - TAG=$(terraform -chdir=infra/stacks/service output -raw image_tag 2>/dev/null || true)
+    - |
+      if [ -n "$TAG" ]; then
+        terraform -chdir=infra/stacks/service plan -lock=false -var-file=envs/staging.tfvars -var "image_tag=$TAG"
+      else
+        echo "staging is not deployed yet: no service plan"
+      fi
+
+# Proves the trust policies: a branch pipeline must not get the staging role, and main must not get the
+# production role. The job fails if AWS accepts the token.
+trust-guard:
+  extends: .aws
+  stage: test
+  needs: []
+  image:
+    name: amazon/aws-cli:2.40.1
+    entrypoint: [""]
+  # The ARNs are built from the account ID: the ROLE_ARN_* deploy variables are protected, so a merge request
+  # pipeline cannot read them. Role ARNs are not secrets; the trust policy is what refuses the token.
+  rules:
+    - if: $CI_COMMIT_TAG || $AWS_ACCOUNT_ID == null
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        AWS_ROLE_ARN: arn:aws:iam::${AWS_ACCOUNT_ID}:role/${CI_PROJECT_NAME}-ci-production
+    - when: on_success
+      variables:
+        AWS_ROLE_ARN: arn:aws:iam::${AWS_ACCOUNT_ID}:role/${CI_PROJECT_NAME}-ci-staging
+  script:
+    - !reference [.aws-token, script]
+    - |
+      if aws sts get-caller-identity 2> err.txt; then
+        echo "FAIL: $AWS_ROLE_ARN accepted a token from ${CI_COMMIT_REF_NAME}"; exit 1
+      fi
+      case "$(cat err.txt)" in
+        *AccessDenied*) echo "PASS: $AWS_ROLE_ARN refused ${CI_COMMIT_REF_NAME}"; cat err.txt ;;
+        *) echo "unexpected error"; cat err.txt; exit 1 ;;
+      esac

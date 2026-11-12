@@ -1,0 +1,73 @@
+# Code quality: lint, types, tests with coverage, and the SonarQube quality gate.
+
+.uv:
+  image: ghcr.io/astral-sh/uv:0.9.30-python3.13-trixie-slim
+  variables:
+    UV_CACHE_DIR: $CI_PROJECT_DIR/.uv-cache
+    UV_LINK_MODE: copy
+    UV_PYTHON_DOWNLOADS: never
+  cache:
+    key:
+      files: [app/uv.lock]
+    paths: [.uv-cache]
+  before_script:
+    - cd app
+    - uv sync --locked
+  after_script:
+    - cd app && uv cache prune --ci
+
+lint:
+  extends: [.uv, .rules:checks]
+  stage: check
+  needs: []
+  script:
+    - uv run ruff check --output-format=gitlab --output-file=gl-code-quality.json . || { uv run ruff check . ; exit 1; }
+    - uv run ruff format --check .
+    - uv run mypy
+  artifacts:
+    when: always
+    expire_in: 1 week
+    reports:
+      codequality: app/gl-code-quality.json
+
+unit-test:
+  extends: [.uv, .rules:checks]
+  stage: check
+  needs: []
+  script:
+    - uv run pytest
+  coverage: '/^TOTAL.*\s(\d+(?:\.\d+)?)%$/'
+  artifacts:
+    when: always
+    expire_in: 1 week
+    reports:
+      junit: app/report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: app/coverage.xml
+    paths: [app/coverage.xml, app/report.xml]
+
+# SonarQube Community Build analyses one branch (main), so the gate runs here, after merge and before any deploy.
+# The job runs on the self-hosted runner next to SonarQube (tag desk-sonar); that runner takes only protected
+# branches, so code from an unmerged branch never reaches it. SONAR_HOST_URL and SONAR_TOKEN are protected variables.
+sonarqube:
+  extends: .python
+  stage: test
+  tags: [desk-sonar]
+  needs: [unit-test]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $SONAR_TOKEN
+  variables:
+    GIT_DEPTH: "0"   # full history: Sonar uses git blame to tell new code from old
+    PIP_CACHE_DIR: $CI_PROJECT_DIR/.pip-cache
+    SONAR_USER_HOME: $CI_PROJECT_DIR/.sonar   # scanner engine and JRE cache
+  cache:
+    key: sonar
+    paths: [.pip-cache, .sonar/cache]
+  script:
+    - pip install --quiet --disable-pip-version-check pysonar==1.11.0.6012
+    - cd app
+    # pysonar 1.11 reports Linux arm64 as arch "other", which SonarQube refuses (HTTP 400) when the scanner
+    # downloads its Java runtime; name the architecture explicitly.
+    - pysonar -Dsonar.scanner.arch=aarch64 -Dsonar.qualitygate.wait=true -Dsonar.qualitygate.timeout=300
+        -Dsonar.projectVersion="$CI_COMMIT_SHORT_SHA"

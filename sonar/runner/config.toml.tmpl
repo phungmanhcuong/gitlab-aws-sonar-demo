@@ -1,0 +1,29 @@
+# GitLab Runner next to SonarQube. Registered in GitLab as: project runner, tag desk-sonar, protected branches
+# only, no untagged jobs. It runs one job at a time on the private network sonar-net, from an allow-listed image,
+# without privileges or extra services, in the host's remapped user namespace.
+# runtime runsc (gVisor) was tried: Docker's embedded DNS on a user-defined network does not reach a gVisor
+# container ("Could not resolve host: gitlab.com"), so jobs use runc.
+concurrent = 1
+check_interval = 3
+shutdown_timeout = 30
+
+[[runners]]
+  name = "desk-sonar"
+  url = "https://gitlab.com"
+  token = "__RUNNER_TOKEN__"
+  executor = "docker"
+  request_concurrency = 2   # long polling: another job request may wait while one is held open
+  [runners.docker]
+    image = "python:3.13.18-slim-trixie"
+    runtime = "__RUNTIME__"
+    privileged = false
+    network_mode = "sonar-net"
+    memory = "2g"
+    cpus = "2"
+    security_opt = ["no-new-privileges:true"]
+    allowed_images = ["python:3.13.18-slim-trixie"]
+    allowed_pull_policies = ["if-not-present"]
+    pull_policy = ["if-not-present"]
+    services_limit = 0
+    volumes = ["/cache"]
+    shm_size = 0

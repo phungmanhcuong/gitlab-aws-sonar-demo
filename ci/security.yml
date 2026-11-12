@@ -1,0 +1,43 @@
+# Security scans. GitLab's SAST (semgrep-sast) and secret detection (secret_detection) jobs come from the
+# templates included in .gitlab-ci.yml. On GitLab Free they only write a report, so security-gate fails the
+# pipeline when a report has findings.
+
+# Start the template jobs at once instead of after the check stage.
+semgrep-sast:
+  needs: []
+
+secret_detection:
+  needs: []
+
+security-gate:
+  extends: [.python, .rules:checks]
+  stage: test
+  needs:
+    - job: semgrep-sast
+      optional: true
+    - job: secret_detection
+      optional: true
+  script:
+    - python3 scripts/security_gate.py --fail-on High gl-sast-report.json gl-secret-detection-report.json
+
+# Known vulnerabilities in the Python dependencies (app/uv.lock).
+dependency-scan:
+  extends: [.trivy, .rules:checks]
+  stage: test
+  needs: []
+  script:
+    - trivy fs --scanners vuln --format json --output trivy-dependencies.json app/
+    - trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 app/
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths: [trivy-dependencies.json]
+
+# Misconfiguration in the Terraform code and the Dockerfile.
+iac-scan:
+  extends: [.trivy, .rules:checks]
+  stage: test
+  needs: []
+  script:
+    - trivy config --severity HIGH,CRITICAL --exit-code 1 infra/
+    - trivy config --severity HIGH,CRITICAL --exit-code 1 app/Dockerfile

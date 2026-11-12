@@ -1,0 +1,48 @@
+# Self-hosted SonarQube Community Build with PostgreSQL. Listens on 127.0.0.1:9000 only: people reach the UI
+# through an SSH tunnel, CI jobs through the private network sonar-net. Images pinned by tag and digest.
+name: sonarqube
+
+services:
+  db:
+    image: postgres:17.11-alpine3.23@sha256:3a5d537cf82c9dc297fe985add4a7e1111b5c9ec52439073968d0fec9cf1ed08
+    env_file: /mnt/data/sonarqube/secrets/db.env   # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB (mode 600)
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    networks: [sonar]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar -d sonar"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  sonarqube:
+    image: sonarqube:26.11.0.134175-community@sha256:1ce197471f5f2bac347694a336862fd2c23e9f57c6edb46acebbfbe70f2c7d9c
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: /mnt/data/sonarqube/secrets/sonar.env  # SONAR_JDBC_URL, SONAR_JDBC_USERNAME, SONAR_JDBC_PASSWORD
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - data:/opt/sonarqube/data
+      - extensions:/opt/sonarqube/extensions
+      - logs:/opt/sonarqube/logs
+    networks: [sonar]
+    mem_limit: 3g
+    ulimits:
+      nofile: { soft: 131072, hard: 131072 }
+      nproc: 8192
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+networks:
+  sonar:
+    name: sonar-net   # the desk-sonar runner attaches its job containers here
+
+volumes:
+  postgres:
+  data:
+  extensions:
+  logs:

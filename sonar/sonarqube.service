@@ -1,0 +1,15 @@
+[Unit]
+Description=SonarQube (docker compose)
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/sonarqube
+ExecStart=/usr/bin/docker compose -f /opt/sonarqube/compose.yaml up -d --wait
+ExecStop=/usr/bin/docker compose -f /opt/sonarqube/compose.yaml down
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

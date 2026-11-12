@@ -1,0 +1,7 @@
+# Who reviews what. On GitLab Free this lists the owners in each merge request; making their approval
+# required is a Premium feature. Replace @your-group/maintainers with your own GitLab user or group.
+*                   @your-group/maintainers
+/ci/                @your-group/maintainers
+/.gitlab-ci.yml     @your-group/maintainers
+/infra/             @your-group/maintainers
+/sonar/             @your-group/maintainers
