@@ -52,7 +52,7 @@ def create_app(settings: Settings | None = None, store: LinkStore | None = None)
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "env": settings.app_env, "version": settings.app_version}
+        return {"status": "ok", "env": settings.app_env, "version": settings.app_version[:7]}
 
     @app.post("/links", status_code=status.HTTP_201_CREATED)
     def create_link(body: NewLink, request: Request, store: StoreDep) -> LinkOut:
