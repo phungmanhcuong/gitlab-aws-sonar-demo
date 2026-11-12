@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn==0.54.0",
     "pydantic==2.14.3",
     "boto3==1.44.0",
+    "python-multipart==0.0.6",
 ]
 
 [dependency-groups]
